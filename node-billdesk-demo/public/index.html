@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>BillDesk Payment Redirect</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 40px;
+      background: #f9f9f9;
+      color: #333;
+    }
+
+    h1 {
+      color: #00427c;
+    }
+
+    form {
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      width: 100%;
+      max-width: 400px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.05);
+    }
+
+    label {
+      display: block;
+      margin: 10px 0 5px;
+    }
+
+    input {
+      width: 100%;
+      padding: 10px;
+      margin-bottom: 15px;
+      border: 1px solid #ccc;
+      border-radius: 5px;
+    }
+
+    button {
+      background: #00427c;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      font-size: 16px;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background: #002e5a;
+    }
+
+    #result {
+      margin-top: 30px;
+      background: white;
+      padding: 15px;
+      border-radius: 5px;
+      white-space: pre-wrap;
+      box-shadow: 0 0 5px rgba(0,0,0,0.1);
+    }
+  </style>
+</head>
+<body>
+
+  <h1>💳 Pay with BillDesk</h1>
+
+  <form id="paymentForm">
+    <label for="amount">Amount (in paise)</label>
+    <input
+      id="amount"
+      name="amount"
+      type="number"
+      required
+      placeholder="e.g. 10000 for ₹100.00"
+    />
+
+    <button type="submit">Start Payment</button>
+  </form>
+
+  <div id="result">Enter amount and submit to initiate payment.</div>
+
+  <script>
+    const resultBox = document.getElementById("result");
+
+    document.getElementById("paymentForm").addEventListener("submit", async function (e) {
+      e.preventDefault();
+      resultBox.textContent = "⏳ Creating order and redirecting...";
+
+      const amount = document.getElementById("amount").value;
+
+      try {
+        const response = await fetch("http://localhost:3500/api/createOrder", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ amount })
+        });
+
+        const data = await response.json();
+
+        console.log("📦 Backend returned:", data);
+
+        if (response.ok && data.redirectUrl) {
+          resultBox.textContent = "✅ Redirecting to BillDesk...";
+          window.location.href = data.redirectUrl; // this is a full URL
+        } else {
+          resultBox.textContent = "⚠️ Backend response but no redirect URL:\n\n" + JSON.stringify(data, null, 2);
+        }
+      } catch (err) {
+        console.error("❌ Fetch error:", err);
+        resultBox.textContent = "❌ Failed to initiate payment:\n\n" + err.message;
+      }
+    });
+  </script>
+
+</body>
+</html>
