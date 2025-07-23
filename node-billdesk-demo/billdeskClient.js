@@ -1,10 +1,41 @@
 require('dotenv').config();
-const axios = require('axios');
+const crypto = require('crypto');
 
 // BillDesk constants from environment variables
 const BD_MID = process.env.BD_MID;
 const BD_SEC_ID = process.env.BD_SEC_ID;
+const BD_CHECKSUM_KEY = process.env.BD_CHECKSUM_KEY; 
 const BD_REDIRECT_URL = process.env.BD_BASE_URL; // BillDesk URL for payment request
+
+/**
+ * Generate a valid CustomerID (8 characters: 3 uppercase letters + 5 numbers)
+ */
+function generateCustomerID() {
+  const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  const digits = '0123456789';
+
+  // Generate 3 random uppercase letters (e.g., ARP)
+  const randomLetters = Array.from({ length: 3 }, () => letters.charAt(Math.floor(Math.random() * letters.length))).join('');
+  
+  // Generate 5 random digits (e.g., 10234)
+  const randomDigits = Array.from({ length: 5 }, () => digits.charAt(Math.floor(Math.random() * digits.length))).join('');
+
+  // Use timestamp to add additional characters if necessary
+  const timestamp = Date.now().toString().slice(-3); // Last 3 digits of timestamp for uniqueness
+
+  // Combine letters, digits, and timestamp to form CustomerID
+  let customerID = randomLetters + randomDigits + timestamp;
+
+  // Ensure the CustomerID has at least 8 characters
+  if (customerID.length < 8) {
+    // Add extra random digits if necessary to make the ID at least 8 characters long
+    const extraDigits = Array.from({ length: 8 - customerID.length }, () => digits.charAt(Math.floor(Math.random() * digits.length))).join('');
+    customerID += extraDigits;
+  }
+
+  return customerID;
+}
+
 
 /**
  * Generate a unique Order ID with the specified format
@@ -22,22 +53,18 @@ function generateOrderId() {
 }
 
 /**
- * Generate a unique Customer Reference Number
+ * Create checksum using HMAC-SHA256
  */
-function generateCustomerID() {
-  const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-  const digits = '0123456789';
+function generateChecksum(payloadStr) {
+  // Generate the checksum using the Checksum Key provided by BillDesk as the secret key
+  const checksum = crypto
+    .createHmac('sha256', BD_CHECKSUM_KEY) // Use the provided Checksum Key for checksum generation
+    .update(payloadStr)                   // Update with the payload string (message)
+    .digest('hex');                       // Generate the checksum in hexadecimal format
 
-  // Generate 3 random uppercase letters (e.g., ARP)
-  const randomLetters = Array.from({ length: 3 }, () => letters.charAt(Math.floor(Math.random() * letters.length))).join('');
+  console.log("🔐 Generated checksum (hexadecimal):", checksum);  // Debug log for checksum
   
-  // Generate 5 random digits (e.g., 10234)
-  const randomDigits = Array.from({ length: 5 }, () => digits.charAt(Math.floor(Math.random() * digits.length))).join('');
-  
-  // Combine letters and digits to form CustomerID
-  const customerID = randomLetters + randomDigits;
-
-  return customerID;
+  return checksum.toUpperCase();  // Return the checksum in hexadecimal format
 }
 
 /**
@@ -47,9 +74,9 @@ async function generatePaymentUrl({ amount, paymentOption }, req) {
   console.log("📩 Received from frontend:", { amount });
 
   const merchantTransactionId = generateOrderId(); // Generate the order ID using our function
-  const customerReferenceNumber = generateCustomerID(); // Generate unique customer reference number
+  const customerReferenceNumber = generateCustomerID(); // Generate valid CustomerID
 
-  // Construct the pipe-separated message as per BillDesk's requirements, with NA placeholders
+  // Construct the pipe-separated message as per BillDesk's requirements
   const msg = [
     BD_MID,                        // Merchant ID (Provided by BillDesk)
     customerReferenceNumber,        // Unique Customer Reference Number (Generated)
@@ -72,13 +99,17 @@ async function generatePaymentUrl({ amount, paymentOption }, req) {
     'NA',                           // Placeholder for additional info fields (txtadditional5)
     'NA',                           // Placeholder for additional info fields (txtadditional6)
     'NA',                           // Placeholder for additional info fields (txtadditional7)
-    'http://www.satsang.org.in/payment_response', // Return URL
+    'http://yourdomain.com/payment/response', // Return URL
   ].join('|'); // Join all fields with pipe separator
 
   console.log("📦 Constructed msg:", msg);
 
+  // Generate checksum for the message and append it at the end
+  const checksum = generateChecksum(msg);
+  const finalMsg = msg + '|' + checksum; // Append checksum to the message
+
   // Construct the full redirect URL (no encoding applied here as per BillDesk's instructions)
-  const redirectUrl = BD_REDIRECT_URL + msg;
+  const redirectUrl = BD_REDIRECT_URL + finalMsg;
 
   console.log("🔗 Final redirect URL:", redirectUrl);
 
@@ -100,7 +131,8 @@ async function generatePaymentUrl({ amount, paymentOption }, req) {
   // Return the redirect URL and other details
   return {
     redirectUrl,
-    fullPayload: msg,
+    merchantTransactionId,
+    fullPayload: finalMsg,
     bdOrderId: merchantTransactionId, // Using the same generated order ID
     customerReferenceNumber,
   };
